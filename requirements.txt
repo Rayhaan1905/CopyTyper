@@ -1,0 +1,6 @@
+google-genai
+python-dotenv
+mss
+Pillow
+pynput
+pyperclip

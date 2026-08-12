@@ -1,64 +1,70 @@
+import threading
 import time
-import random
-import pyperclip
-from pynput.keyboard import Controller, Key
-from config import MIN_KEYSTROKE_DELAY, MAX_KEYSTROKE_DELAY, USE_CLIPBOARD_PASTE, WAIT_BEFORE_TYPING
+from capture import capture_screen
+from analyzer import analyze_screenshot
+from typer import type_output
+from hotkeys import HotkeyManager
+from agent_state import state
 
-keyboard = Controller()
+def handle_capture():
+    if state.is_analyzing:
+        return
 
-def human_type(text):
-    pyperclip.copy(text)
-    content = pyperclip.paste()
-    pyperclip.copy("")
+    state.is_analyzing = True
+    state.status = "capturing"
+    print("[*] Capturing screen...")
 
-    SAFE_TYPE_CHARS = set('abcdefghijklmnopqrstuvwxyz0123456789 .,;-=[\\/]')
+    def run():
+        try:
+            img = capture_screen()
+            state.status = "analyzing"
+            print("[*] Analyzing...")
 
-    lines = content.split('\n')
+            result = analyze_screenshot(img)
 
-    for line_index, line in enumerate(lines):
-        # Strip ALL leading whitespace — let editor handle indentation
-        stripped = line.lstrip()
-
-        for char in stripped:
-            if char in SAFE_TYPE_CHARS:
-                keyboard.press(char)
-                keyboard.release(char)
+            if result:
+                state.last_output = result
+                state.status = "ready"
+                print("[*] Response received:\n")
+                print(result)
+                print("\n[*] Typing in progress...")
+                type_output(result)
+                state.status = "idle"
+                state.last_output = None
+                print("[*] Done.")
             else:
-                keyboard.type(char)
-                time.sleep(0.05)
+                state.status = "idle"
+                print("[*] Analysis failed.")
+        except Exception as e:
+            print(f"[Error]: {e}")
+            state.status = "idle"
+        finally:
+            state.is_analyzing = False
 
-            time.sleep(random.uniform(MIN_KEYSTROKE_DELAY, MAX_KEYSTROKE_DELAY))
-
-        # Press Enter after each line except the last
-        if line_index < len(lines) - 1:
-            keyboard.press(Key.enter)
-            keyboard.release(Key.enter)
-            time.sleep(random.uniform(0.08, 0.15))
-
-
-def paste_via_clipboard(text):
-    original = pyperclip.paste()
-    pyperclip.copy(text)
-    time.sleep(0.2)
-    with keyboard.pressed(Key.ctrl):
-        keyboard.press('v')
-        keyboard.release('v')
-    time.sleep(0.3)
-    pyperclip.copy(original)
+    threading.Thread(target=run, daemon=True).start()
 
 
-def type_output(text):
-    print("[*] Move cursor to target field...")
-    time.sleep(WAIT_BEFORE_TYPING)
-    with keyboard.pressed(Key.ctrl):
-        keyboard.press('a')
-        keyboard.release('a')
-    time.sleep(0.1)
-    keyboard.press(Key.backspace)
-    keyboard.release(Key.backspace)
-    time.sleep(0.1)
-        
-    if USE_CLIPBOARD_PASTE:
-        paste_via_clipboard(text)
-    else:
-        human_type(text)
+def handle_cancel():
+    state.is_analyzing = False
+    state.is_ready_to_type = False
+    state.last_output = None
+    state.status = "idle"
+    print("[*] Cancelled.")
+
+
+def main():
+    manager = HotkeyManager(
+        on_capture = handle_capture,
+        on_type    = handle_cancel,
+        on_cancel  = handle_cancel
+    )
+    manager.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        manager.stop()
+
+if __name__ == "__main__":
+    main()

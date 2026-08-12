@@ -14,7 +14,6 @@ def analyze_screenshot(pil_image):
         )
         raw = response.text.strip()
 
-        # Clean up any markdown that slipped through
         if raw.startswith("```"):
             lines = raw.split("\n")
             if lines[0].startswith("```"):
